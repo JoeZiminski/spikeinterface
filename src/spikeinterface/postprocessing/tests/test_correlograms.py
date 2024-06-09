@@ -65,6 +65,47 @@ def _test_correlograms(sorting, window_ms, bin_ms, methods):
             assert np.allclose(bins, ref_bins, atol=1e-10), f"Failed with method={method}"
 
 
+def test_comparing_sparse_correlogram():
+
+    window_ms = 200
+    bin_ms = 10
+    num_units = 200
+    duration = 500
+    sorting = generate_sorting(num_units=num_units, sampling_frequency=30000.0, durations=[duration], seed=0)
+
+    import time
+    import matplotlib.pyplot as plt
+
+    t = time.perf_counter()
+    correlograms, bins = compute_correlograms_on_sorting(sorting, window_ms=window_ms, bin_ms=bin_ms, method="numpy")
+    numpy_time = time.perf_counter() - t
+
+    t = time.perf_counter()
+    correlograms_numba_sparse, bins = compute_correlograms_on_sorting(
+        sorting, window_ms=window_ms, bin_ms=bin_ms, method="numba"
+    )
+    numpa_ = time.perf_counter() - t
+
+    t = time.perf_counter()
+    correlograms_sparse, bins = compute_correlograms_on_sorting(
+        sorting, window_ms=window_ms, bin_ms=bin_ms, method="sparse"
+    )
+    sparse = time.perf_counter() - t
+
+    plt.plot(correlograms[0, 0, :])
+    plt.plot(correlograms_sparse[0, 0, :])
+    plt.plot(correlograms_numba_sparse[0, 0, :])
+    plt.title(f"num_units: {num_units}, duration: {duration}, window_ms: {window_ms}, bin_ms: {bin_ms}")
+    plt.legend(
+        [
+            f"numpy (time: {numpy_time:0.2f}",
+            f"sprase (time: {sparse:0.2f}",
+            f"numba (time: {numpa_:0.2f}",
+        ]
+    )
+    plt.show()
+
+
 def test_equal_results_correlograms():
     # compare that the 2 methods have same results
     methods = ["numpy"]

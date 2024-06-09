@@ -177,15 +177,18 @@ def compute_correlograms_on_sorting(sorting, window_ms, bin_ms, method="auto"):
     """
     Computes several cross-correlogram in one course from several clusters.
     """
-    assert method in ("auto", "numba", "numpy")
+    assert method in ("auto", "numba", "numpy", "sparse")
 
     if method == "auto":
         method = "numba" if HAVE_NUMBA else "numpy"
 
     bins, window_size, bin_size = _make_bins(sorting, window_ms, bin_ms)
 
-    if method == "numpy":
-        correlograms = compute_correlograms_numpy(sorting, window_size, bin_size)
+    if method in ["numpy", "sparse"]:
+        sparse = True if method == "sparse" else False
+        # TODO: Handle bins output! it is now not correct for sparse
+
+        correlograms = compute_correlograms_numpy(sorting, window_size, bin_size, sparse=sparse)
     if method == "numba":
         correlograms = compute_correlograms_numba(sorting, window_size, bin_size)
 
@@ -193,7 +196,7 @@ def compute_correlograms_on_sorting(sorting, window_ms, bin_ms, method="auto"):
 
 
 # LOW-LEVEL IMPLEMENTATIONS
-def compute_correlograms_numpy(sorting, window_size, bin_size):
+def compute_correlograms_numpy(sorting, window_size, bin_size, sparse=False):
     """
     Computes cross-correlograms for all units in a sorting object.
 
@@ -215,72 +218,133 @@ def compute_correlograms_numpy(sorting, window_size, bin_size):
     num_half_bins = int(window_size // bin_size)
     num_bins = int(2 * num_half_bins)
 
+    if sparse:
+        num_bins = num_bins + 1
+
     correlograms = np.zeros((num_units, num_units, num_bins), dtype="int64")
 
     for seg_index in range(num_seg):
         spike_times = spikes[seg_index]["sample_index"]
         spike_labels = spikes[seg_index]["unit_index"]
 
-        c0 = correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size)
+        c0 = correlogram_for_one_segment(
+            spike_times, spike_labels, window_size, bin_size, num_bins, num_half_bins, sparse=sparse
+        )
 
         correlograms += c0
 
     return correlograms
 
 
-def correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size):
+def compute_sparse_correlogram(Y, shift):
+    if shift == 0:
+        return Y.T @ Y
+    elif np.sign(shift) == -1:
+        return Y[:shift, :].T @ Y[np.abs(shift) :, :]
+        # check matrix type (csr or row)
+    else:
+        return Y[shift:, :].T @ Y[:-shift, :]
+
+
+def correlogram_for_one_segment(
+    spike_times, spike_labels, window_size, bin_size, num_bins, num_half_bins, sparse=False
+):
     """
     Called by compute_correlograms_numpy
     """
-
-    num_half_bins = int(window_size // bin_size)
-    num_bins = int(2 * num_half_bins)
     num_units = len(np.unique(spike_labels))
+
+    if sparse:
+        correlograms = correlogram_for_one_segment_sparse(
+            spike_times, spike_labels, window_size, bin_size, num_bins, num_half_bins, num_units
+        )
+    else:
+
+        correlograms = np.zeros((num_units, num_units, num_bins), dtype="int64")
+
+        # At a given shift, the mask precises which spikes have matching spikes
+        # within the correlogram time window.
+        mask = np.ones_like(spike_times, dtype="bool")
+
+        # The loop continues as long as there is at least one spike with
+        # a matching spike.
+        shift = 1
+        while mask[:-shift].any():
+            # Number of time samples between spike i and spike i+shift.
+            spike_diff = spike_times[shift:] - spike_times[:-shift]
+
+            for sign in (-1, 1):
+                # Binarize the delays between spike i and spike i+shift for negative and positive
+                # the operator // is np.floor_divide
+                spike_diff_b = (spike_diff * sign) // bin_size
+
+                # Spikes with no matching spikes are masked.
+                if sign == -1:
+                    mask[:-shift][spike_diff_b < -num_half_bins] = False
+                else:
+                    mask[:-shift][spike_diff_b >= num_half_bins] = False
+
+                m = mask[:-shift]
+
+                # Find the indices in the raveled correlograms array that need
+                # to be incremented, taking into account the spike clusters.
+                if sign == 1:
+                    indices = np.ravel_multi_index(
+                        (spike_labels[+shift:][m], spike_labels[:-shift][m], spike_diff_b[m] + num_half_bins),
+                        correlograms.shape,
+                    )
+                else:
+                    indices = np.ravel_multi_index(
+                        (spike_labels[:-shift][m], spike_labels[+shift:][m], spike_diff_b[m] + num_half_bins),
+                        correlograms.shape,
+                    )
+
+                # Increment the matching spikes in the correlograms array.
+                bbins = np.bincount(indices)
+                correlograms.ravel()[: len(bbins)] += bbins
+
+            shift += 1
+
+    return correlograms
+
+
+def correlogram_for_one_segment_sparse(
+    spike_times, spike_labels, window_size, bin_size, num_bins, num_half_bins, num_units, remove_static=True
+):
+    """ """
+    from scipy.sparse import csr_matrix, kron, eye, csc_array
+
+    num_samples = spike_times[-1] + 1  # TODO: CHECK
 
     correlograms = np.zeros((num_units, num_units, num_bins), dtype="int64")
 
-    # At a given shift, the mask precises which spikes have matching spikes
-    # within the correlogram time window.
-    mask = np.ones_like(spike_times, dtype="bool")
+    # Extend the number of samples so it is divisible by
+    # bin_size, required for the binning step.
+    n_to_add = bin_size - num_samples % bin_size
+    extend_num_samples = num_samples + n_to_add
 
-    # The loop continues as long as there is at least one spike with
-    # a matching spike.
-    shift = 1
-    while mask[:-shift].any():
-        # Number of time samples between spike i and spike i+shift.
-        spike_diff = spike_times[shift:] - spike_times[:-shift]
+    Y_full = csr_matrix((np.ones(spike_times.size), (spike_times, spike_labels)), shape=(extend_num_samples, num_units))
 
-        for sign in (-1, 1):
-            # Binarize the delays between spike i and spike i+shift for negative and positive
-            # the operator // is np.floor_divide
-            spike_diff_b = (spike_diff * sign) // bin_size
+    # Bin the spikes using a summation matrix
+    # num_samples_to_add = int(extend_num_samples / num_bins)
+    addition_matrix_base = csr_matrix(np.ones(bin_size)[:, np.newaxis])
+    addition_matrix = kron(eye(int(extend_num_samples / bin_size)), addition_matrix_base)
 
-            # Spikes with no matching spikes are masked.
-            if sign == -1:
-                mask[:-shift][spike_diff_b < -num_half_bins] = False
-            else:
-                mask[:-shift][spike_diff_b >= num_half_bins] = False
+    Y = csc_array(addition_matrix.T @ Y_full)
 
-            m = mask[:-shift]
+    if remove_static:
+        Mean = compute_sparse_correlogram(Y_full, 0)
+    else:
+        Mean = csc_matrix((num_units, num_units))  # TODO: CHECK!
 
-            # Find the indices in the raveled correlograms array that need
-            # to be incremented, taking into account the spike clusters.
-            if sign == 1:
-                indices = np.ravel_multi_index(
-                    (spike_labels[+shift:][m], spike_labels[:-shift][m], spike_diff_b[m] + num_half_bins),
-                    correlograms.shape,
-                )
-            else:
-                indices = np.ravel_multi_index(
-                    (spike_labels[:-shift][m], spike_labels[+shift:][m], spike_diff_b[m] + num_half_bins),
-                    correlograms.shape,
-                )
+    all_shifts = np.arange(-num_half_bins, num_half_bins + 1)
+    for idx, shift in enumerate(all_shifts):
 
-            # Increment the matching spikes in the correlograms array.
-            bbins = np.bincount(indices)
-            correlograms.ravel()[: len(bbins)] += bbins
-
-        shift += 1
+        if shift == 0:
+            shifted_correlogram = compute_sparse_correlogram(Y, shift)
+            correlograms[:, :, idx] = (shifted_correlogram - Mean).toarray()
+        else:
+            correlograms[:, :, idx] = compute_sparse_correlogram(Y, shift).toarray()
 
     return correlograms
 
