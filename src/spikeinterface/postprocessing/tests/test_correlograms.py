@@ -18,6 +18,7 @@ from spikeinterface.postprocessing.correlograms import (
     _make_bins,
     correlogram_for_one_segment,
     _compute_correlograms_numba,
+    _compute_correlograms_numba_new,
 )
 
 
@@ -66,16 +67,21 @@ def test_correlograms_unit():
     # TODO: actually calculuate!
     #  if method == "numba":
     num_bins = 120
-    result = np.zeros((2, 2, num_bins))
+    result = np.zeros((2, 2, num_bins), dtype=np.int64)
     _compute_correlograms_numba(result, spike_times, spike_labels, window_size, bin_size)
-    #   else:
+
+    result_test = np.zeros((2, 2, num_bins), dtype=np.int64)
+    _compute_correlograms_numba_new(result_test, spike_times, spike_labels, window_size, bin_size)
 
     result_ = correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size)
 
     # they do not match for [1, 0] only so a backwards case issue!
     # they shift slightly different to the left or right...
     # tackle the 0.0051 case first, easier to interpret
-    assert np.array_equal(result[1, 0, :], result_[1, 0, :])
+    breakpoint()
+    for i in range(2):
+        for j in range(2):  # use num units
+            assert np.array_equal(result_[i, j, :], result_test[i, j, :]), f"{i}, {j} index failed."
 
     # Okay, the problem, occurs when there is two spikes in
     # different units at exactly the same time. Then these are counted!

@@ -252,9 +252,6 @@ def correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size
 
         for sign in (-1, 1):
 
-            if sign == -1:
-                breakpoint()
-
             # Binarize the delays between spike i and spike i+shift for negative and positive
             # the operator // is np.floor_divide
             spike_diff_b = (spike_diff * sign) // bin_size
@@ -303,7 +300,7 @@ def compute_correlograms_numba(sorting, window_size, bin_size):
 
     Implementation: Aurélien Wyngaard
     """
-
+    new = True
     assert HAVE_NUMBA, "numba version of this function requires installation of numba"
 
     num_bins = 2 * int(window_size / bin_size)
@@ -315,9 +312,14 @@ def compute_correlograms_numba(sorting, window_size, bin_size):
         spike_times = spikes[seg_index]["sample_index"]
         spike_labels = spikes[seg_index]["unit_index"]
 
-        _compute_correlograms_numba(
-            correlograms, spike_times.astype(np.int64), spike_labels.astype(np.int32), window_size, bin_size
-        )
+        if new:
+            _compute_correlograms_numba_new(
+                correlograms, spike_times.astype(np.int64), spike_labels.astype(np.int32), window_size, bin_size
+            )
+        else:
+            _compute_correlograms_numba(
+                correlograms, spike_times.astype(np.int64), spike_labels.astype(np.int32), window_size, bin_size
+            )
 
     return correlograms
 
@@ -374,6 +376,9 @@ if HAVE_NUMBA:
 
         return cross_corr
 
+    # To ask: why not cache? shouldnt make much difference
+    # TODO: try 'eager compilation'
+    # cool, play around with boundscheck
     @numba.jit(
         nopython=True,
         nogil=True,
@@ -396,3 +401,36 @@ if HAVE_NUMBA:
                     cc = _compute_crosscorr_numba(spike_times1, spike_times2, window_size, bin_size)
                     correlograms[i, j, :] += cc
                     correlograms[j, i, :] += cc[::-1]
+
+    # TODO: supply type at this stage?
+    @numba.jit(
+        nopython=True,
+        nogil=True,
+        cache=False,
+    )
+    def _compute_correlograms_numba_new(correlograms, spike_times, spike_labels, window_size, bin_size):
+
+        num_half_bins = window_size // bin_size
+        num_bins = 2 * num_half_bins
+
+        start_j = 0
+        for i in range(spike_times.size):
+            for j in range(start_j, spike_times.size):
+
+                if i == j:  # with this, the autocorr is the same and the xcorr not. without
+                    continue
+
+                diff = spike_times[i] - spike_times[j]
+
+                #       if diff == 0:  # TODO: new addition. wonder what is to be done about it. ATM it is stored in a different bin. At least match numpy.
+                #          continue
+
+                if diff >= window_size:  # j is too far behind
+                    start_j += 1
+                    continue
+                if diff < -window_size:  # j is too far ahead. i is done.
+                    break
+
+                bin = diff // bin_size  # int(math.floor(diff / bin_size))
+
+                correlograms[spike_labels[i], spike_labels[j], num_half_bins + bin] += 1
