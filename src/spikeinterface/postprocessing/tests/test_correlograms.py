@@ -13,7 +13,12 @@ except ModuleNotFoundError as err:
 from spikeinterface import NumpySorting, generate_sorting
 from spikeinterface.postprocessing.tests.common_extension_tests import AnalyzerExtensionCommonTestSuite
 from spikeinterface.postprocessing import ComputeCorrelograms
-from spikeinterface.postprocessing.correlograms import compute_correlograms_on_sorting, _make_bins
+from spikeinterface.postprocessing.correlograms import (
+    compute_correlograms_on_sorting,
+    _make_bins,
+    correlogram_for_one_segment,
+    _compute_correlograms_numba,
+)
 
 
 class ComputeCorrelogramsTest(AnalyzerExtensionCommonTestSuite, unittest.TestCase):
@@ -40,6 +45,49 @@ def test_make_bins():
     bins, window_size, bin_size = _make_bins(sorting, window_ms, bin_ms)
     assert bins.size == np.floor(window_ms / bin_ms) + 1
     # print(bins, window_size, bin_size)
+
+
+# do numpy and numba
+def test_correlograms_unit():
+
+    sampling_rate = 30000
+
+    spike_times = np.repeat(np.arange(50), 2) * 0.0051
+    spike_labels = np.zeros(100, dtype=int)
+    spike_labels[::2] = 1
+
+    spike_times *= sampling_rate
+    spike_times = spike_times.astype(int)
+
+    window_size = int(0.3 * sampling_rate)
+    bin_size = int(0.005 * sampling_rate)
+
+    # TODO: so now the window is -100 to + 100? weird, check docs
+    # TODO: actually calculuate!
+    #  if method == "numba":
+    num_bins = 120
+    result = np.zeros((2, 2, num_bins))
+    _compute_correlograms_numba(result, spike_times, spike_labels, window_size, bin_size)
+    #   else:
+
+    result_ = correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size)
+
+    # they do not match for [1, 0] only so a backwards case issue!
+    # they shift slightly different to the left or right...
+    # tackle the 0.0051 case first, easier to interpret
+    assert np.array_equal(result[1, 0, :], result_[1, 0, :])
+
+    # It seems they are both somehow adding in an extra bin in the
+    # backwards case. All array should be equal but [1, 0] is different,
+    # a whole in, with 50! it's like the zero-offset bin is added back :S
+
+    if False:
+        empty_bins = np.zeros(10, dtype=int)
+        filled_bins = np.arange(1, 50)
+        expected_output = np.r_[empty_bins, filled_bins, 0, 0, np.flip(filled_bins), empty_bins]
+
+        # TODO: check over all dims
+        assert np.array_equal(result[0, 0, :], expected_output)
 
 
 def _test_correlograms(sorting, window_ms, bin_ms, methods):
