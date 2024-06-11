@@ -250,10 +250,17 @@ def correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size
         # Number of time samples between spike i and spike i+shift.
         spike_diff = spike_times[shift:] - spike_times[:-shift]
 
+        if any(spike_diff < 0):
+            print("JOE")
+
         for sign in (-1, 1):
 
             # Binarize the delays between spike i and spike i+shift for negative and positive
             # the operator // is np.floor_divide
+
+            #   if np.any(spike_diff == 661):
+            #      breakpoint()
+
             spike_diff_b = (spike_diff * sign) // bin_size
 
             # Spikes with no matching spikes are masked.
@@ -285,6 +292,9 @@ def correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size
             bbins = np.bincount(indices)
             correlograms.ravel()[: len(bbins)] += bbins
 
+        #    if np.any(spike_diff == 720):
+        #          breakpoint()
+
         shift += 1
 
     return correlograms
@@ -300,7 +310,7 @@ def compute_correlograms_numba(sorting, window_size, bin_size):
 
     Implementation: Aurélien Wyngaard
     """
-    new = True
+    new = False
     assert HAVE_NUMBA, "numba version of this function requires installation of numba"
 
     num_bins = 2 * int(window_size / bin_size)
@@ -363,6 +373,12 @@ if HAVE_NUMBA:
             for j in range(start_j, len(spike_times2)):
                 diff = spike_times1[i] - spike_times2[j]
 
+                #      if diff == -720:
+                #         breakpoint()
+
+                if diff < 0:
+                    print("JOE")
+
                 if diff >= window_size:
                     start_j += 1
                     continue
@@ -372,6 +388,11 @@ if HAVE_NUMBA:
                 bin = int(math.floor(diff / bin_size))
                 # ~ bin = diff // bin_size
                 cross_corr[num_half_bins + bin] += 1
+
+                if (num_half_bins + bin) in [25, 26, 27]:
+                    print(bin_size)
+                    print(diff)
+
                 # ~ print(diff, bin, num_half_bins + bin)
 
         return cross_corr
