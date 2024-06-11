@@ -67,13 +67,13 @@ def test_correlograms_unit():
     # TODO: actually calculuate!
     #  if method == "numba":
     num_bins = 120
-    result = np.zeros((2, 2, num_bins), dtype=np.int64)
-    _compute_correlograms_numba(result, spike_times, spike_labels, window_size, bin_size)
+    result_orig = np.zeros((2, 2, num_bins), dtype=np.int64)
+    _compute_correlograms_numba(result_orig, spike_times, spike_labels, window_size, bin_size)
 
     result_test = np.zeros((2, 2, num_bins), dtype=np.int64)
     _compute_correlograms_numba_new(result_test, spike_times, spike_labels, window_size, bin_size)
 
-    result_ = correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size)
+    result_numpy = correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size)
 
     # they do not match for [1, 0] only so a backwards case issue!
     # they shift slightly different to the left or right...
@@ -119,7 +119,7 @@ def _test_correlograms(sorting, window_ms, bin_ms, methods):
             # ~ plt.show()
 
             # numba and numyp do not have exactly the same output
-            # assert np.all(correlograms == ref_correlograms), f"Failed with method={method}"
+            assert np.all(correlograms == ref_correlograms), f"Failed with method={method}"
 
             assert np.allclose(bins, ref_bins, atol=1e-10), f"Failed with method={method}"
 

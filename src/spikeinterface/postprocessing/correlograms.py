@@ -351,7 +351,7 @@ if HAVE_NUMBA:
 
         return auto_corr
 
-    @numba.jit(nopython=True, nogil=True, cache=False)
+    # @numba.jit(nopython=True, nogil=True, cache=False)
     def _compute_crosscorr_numba(spike_times1, spike_times2, window_size, bin_size):
         num_half_bins = window_size // bin_size
         num_bins = 2 * num_half_bins
@@ -379,12 +379,12 @@ if HAVE_NUMBA:
     # To ask: why not cache? shouldnt make much difference
     # TODO: try 'eager compilation'
     # cool, play around with boundscheck
-    @numba.jit(
-        nopython=True,
-        nogil=True,
-        cache=False,
-        parallel=True,
-    )
+    #   @numba.jit(
+    #       nopython=True,
+    #       nogil=True,
+    #       cache=False,
+    #      parallel=True,
+    #  )
     def _compute_correlograms_numba(correlograms, spike_times, spike_labels, window_size, bin_size):
         n_units = correlograms.shape[0]
 
