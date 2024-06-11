@@ -77,6 +77,11 @@ def test_correlograms_unit():
     # tackle the 0.0051 case first, easier to interpret
     assert np.array_equal(result[1, 0, :], result_[1, 0, :])
 
+    # Okay, the problem, occurs when there is two spikes in
+    # different units at exactly the same time. Then these are counted!
+    # but the policy of these algorithms is not to count in this instance.
+    # but this is only done for the autocorrelogram and NOT the cross-correlogram
+
     # It seems they are both somehow adding in an extra bin in the
     # backwards case. All array should be equal but [1, 0] is different,
     # a whole in, with 50! it's like the zero-offset bin is added back :S

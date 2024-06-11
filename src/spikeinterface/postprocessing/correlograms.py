@@ -251,6 +251,10 @@ def correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size
         spike_diff = spike_times[shift:] - spike_times[:-shift]
 
         for sign in (-1, 1):
+
+            if sign == -1:
+                breakpoint()
+
             # Binarize the delays between spike i and spike i+shift for negative and positive
             # the operator // is np.floor_divide
             spike_diff_b = (spike_diff * sign) // bin_size
@@ -266,11 +270,15 @@ def correlogram_for_one_segment(spike_times, spike_labels, window_size, bin_size
             # Find the indices in the raveled correlograms array that need
             # to be incremented, taking into account the spike clusters.
             if sign == 1:
+                # in this case, the diffs are bumped over 60! and so not recording
+                # but in the second case, the diffs are negative...
                 indices = np.ravel_multi_index(
                     (spike_labels[+shift:][m], spike_labels[:-shift][m], spike_diff_b[m] + num_half_bins),
                     correlograms.shape,
                 )
             else:
+                # I think when there is zero diff between spikes of differnt units, it is counting them all yes indeed it is counting them
+                # all in the central bin. This is correct... but it is not expected and not done in the positive direction?
                 indices = np.ravel_multi_index(
                     (spike_labels[:-shift][m], spike_labels[+shift:][m], spike_diff_b[m] + num_half_bins),
                     correlograms.shape,
