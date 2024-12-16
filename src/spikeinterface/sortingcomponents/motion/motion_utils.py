@@ -68,7 +68,13 @@ class Motion:
         else:
             rigid_txt = f"non-rigid - {nbins} spatial bins"
 
-        interval_s = self.temporal_bins_s[0][1] - self.temporal_bins_s[0][0]
+        if self.temporal_bins_s[0].size > 1:
+            interval_s = self.temporal_bins_s[0][1] - self.temporal_bins_s[0][0]
+        else:
+            # If there is only one temporal bin (entire session), assume the bin
+            # left edge is zero, and take twice it for the bin size.
+            interval_s = self.temporal_bins_s[0][0] * 2
+
         txt = f"Motion {rigid_txt} - interval {interval_s}s - {self.num_segments} segments"
         return txt
 
